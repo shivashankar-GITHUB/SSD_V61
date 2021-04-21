@@ -1,0 +1,139 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE Rule PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<Rule created="1582552751358" id="4028698170203c1a0170777e9cfe0999" language="beanshell" modified="1589797656863" name="All-Apps-Info">
+  <Source>
+
+
+  import java.io.BufferedWriter;
+  import java.io.FileWriter;
+  import java.nio.file.Files;
+  import java.nio.file.Paths;
+  import java.util.HashMap;
+  import java.util.List;
+  import java.util.Map;
+  import java.util.Set;
+
+  import sailpoint.api.SailPointContext;
+  import sailpoint.object.Identity;
+  import sailpoint.connector.Connector;
+  import sailpoint.connector.ConnectorFactory;
+  import sailpoint.object.Application;
+  import sailpoint.object.EmailFileAttachment;
+  import sailpoint.object.EmailOptions;
+  import sailpoint.object.Identity;
+  import sailpoint.tools.GeneralException;
+  import sailpoint.object.EmailOptions;
+  import sailpoint.object.EmailFileAttachment;
+  import sailpoint.object.EmailTemplate;
+  import sailpoint.object.Rule;
+
+  import java.util.ArrayList;
+  import sailpoint.tools.Util;
+
+
+  String fileName = "PROD-Apps-Info.csv";
+  FileWriter fw = new FileWriter(fileName); 
+  BufferedWriter WriteFileBuffer = new BufferedWriter(fw);
+
+  WriteFileBuffer.write("Application Name,Connector Type,Application Type,Application Owner,Application - Deprovisioning Policy,Test Connection,Before ProvisioningRule,After ProvisioningRule,Global ProvisioningRule,Correlation Rule,Managed Attributes");
+  WriteFileBuffer.newLine();
+
+  List Apps = context.getObjects(Application.class);
+  for (Application application : Apps) {
+    if(application != null){
+      String appType = application.getType();
+     if((appType!= null) &amp;&amp; !( appType.equalsIgnoreCase("TopSecret - Full") || appType.equalsIgnoreCase("Active Directory - Direct") ))     
+      {
+        String line = "";
+        String appName = application.getName();
+        String attributeValue = (String) application.getAttributeValue("deprovisioningPolicy");
+        String connector = application.getConnector();
+
+        
+        String beforeProvRule = "";
+        String afterProvRule = "";
+        String globalProvRule = "";
+        String correlationRule = "";
+        Identity owner = application.getOwner();
+        String ownerName = "";
+        if(owner != null){
+          ownerName = owner.getName();
+        }
+        String testConnection = "";
+        boolean isTestFail = false;
+        try {
+
+          if (application != null) {
+            try {
+              Connector connector = ConnectorFactory.getConnector(application, null);
+              connector.testConfiguration();
+            } catch (Exception e) {
+              isTestFail = true;
+            }
+          }
+        }catch (Exception e) {
+        }
+        if(isTestFail){
+          testConnection = "fail";
+        }
+        else
+        {
+          testConnection = "success";
+        }
+       
+        beforeProvRule = application.getAttributeValue("beforeProvisioningRule");
+        afterProvRule = application.getAttributeValue("afterProvisioningRule");
+
+        if(appType.equalsIgnoreCase("JDBC"))
+        {
+          
+
+          globalProvRule = application.getAttributeValue("jdbcProvisionRule");
+        }
+       
+
+        Rule corrRule = application.getCorrelationRule();
+        if(corrRule != null)
+        {
+          correlationRule = corrRule.getName();
+        }
+
+
+
+        String listToCsv = "";
+        List entitlementAttributeNames = application.getEntitlementAttributeNames();
+        if(entitlementAttributeNames != null @and !entitlementAttributeNames.isEmpty()){
+
+          listToCsv = Util.listToCsv(entitlementAttributeNames);
+          listToCsv = listToCsv.replace(",", " |");
+        }
+
+        line = appName+","+connector+","+appType+","+ownerName+","+attributeValue+","+testConnection+","+beforeProvRule+","+afterProvRule+","+globalProvRule+","+correlationRule+","+listToCsv;
+
+        WriteFileBuffer.write(line);
+        WriteFileBuffer.newLine();
+      }
+    }
+  }
+
+  WriteFileBuffer.close();
+
+
+  EmailTemplate template = context.getObjectByName(EmailTemplate.class, "EFX-Email-Application-Information");
+  if(template != null){
+
+    EmailOptions options = new EmailOptions();
+    byte[] bFile = Files.readAllBytes(Paths.get(fileName)); 
+    EmailFileAttachment attachment = new EmailFileAttachment( "PROD-Apps-Info.csv", EmailFileAttachment.MimeType.MIME_CSV, bFile);
+    options.addAttachment(attachment);
+    // options.setTo("sandeep.jabbala@equifax.com,nishant.gaurav@equifax.com");
+    options.setTo("sandeep.jabbala@equifax.com");
+    context.sendEmailNotification(template,options);
+  }
+
+
+  return "success";
+
+
+  </Source>
+</Rule>

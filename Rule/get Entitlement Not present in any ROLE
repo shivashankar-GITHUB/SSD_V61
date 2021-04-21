@@ -1,0 +1,165 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE Rule PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<Rule created="1599235434711" id="9414fa9474561661017459dc28d728fc" language="beanshell" modified="1599248092783" name="LDAP_EDLI_Ent">
+  <Source>
+
+  import java.io.BufferedWriter;
+  import java.io.FileWriter;
+  import java.io.IOException;
+  import java.util.ArrayList;
+  import java.util.Date;
+  import java.util.HashMap;
+  import java.util.List;
+  import java.util.*;
+  import java.io.File;
+
+  import sailpoint.api.IdentityService;
+  import sailpoint.api.ObjectUtil;
+  import sailpoint.api.SailPointContext;
+  import sailpoint.object.Application;
+  import sailpoint.object.Attributes;
+  import sailpoint.object.Bundle;
+  import sailpoint.object.Custom;
+  import sailpoint.object.Filter;
+  import sailpoint.object.Filter.LeafFilter;
+  import sailpoint.object.Filter.MatchMode;
+  import sailpoint.object.Identity;
+  import sailpoint.object.Link;
+  import sailpoint.object.ManagedAttribute;
+  import sailpoint.object.Profile;
+  import sailpoint.object.QueryOptions;
+  import sailpoint.tools.GeneralException;
+  import sailpoint.tools.Util;
+
+  List entList = new ArrayList();
+
+  Filter eq = Filter.eq("application.name", "LDAP-Enterprise Data Lake Infrastructure");
+  //Filter eq = Filter.eq("application.name", "ad");
+
+  List&lt;ManagedAttribute> ldapEntList = context.getObjects(ManagedAttribute.class,
+                                                             new QueryOptions().addFilter(eq));
+
+  if (Util.nullSafeSize(ldapEntList) > 0) {
+
+    // entList = ObjectUtil.getObjectNames(ldapEntList);
+
+    for (ManagedAttribute managedAttribute : ldapEntList) {
+
+      entList.add(managedAttribute.getValue());
+    }
+  }
+
+  //return entList;
+  Filter typeFilter = Filter.eq("type", "it");
+  Filter likeFilter = Filter.like("name", "Enterprise Data Lake Infrastructure", MatchMode.START);
+
+  Filter finalFilter = Filter.and(typeFilter, likeFilter);
+
+  List&lt;Bundle> bundleList = context.getObjects(Bundle.class, new QueryOptions().addFilter(finalFilter));
+  // return bundleList.size();
+  List list = new ArrayList();
+  if (Util.nullSafeSize(bundleList) > 0) {
+
+    for (Bundle bundle : bundleList) {
+
+      List&lt;Profile> profiles = bundle.getProfiles();
+      if (profiles != null &amp;&amp; !profiles.isEmpty()) {
+        for (Profile profile : profiles) {
+          List&lt;Filter> constraints = profile.getConstraints();
+          if (constraints != null &amp;&amp; !constraints.isEmpty()) {
+            for (Filter filter : constraints) {
+              if (filter instanceof LeafFilter) {
+                LeafFilter lf = (LeafFilter) filter;
+
+                Object fvalue = lf.getValue();
+                if (fvalue instanceof String) {
+                  // list.add(lf.getValue());
+                  if (entList.contains(lf.getValue())) {
+                    entList.remove(lf.getValue());
+                  }
+                } else if (fvalue instanceof List) {
+                  // list.addAll((List)lf.getValue());
+                  if (entList.containsAll((List) lf.getValue())) {
+                    entList.removeAll((List) lf.getValue());
+                  }
+                }
+              }
+
+            }
+          }
+        }
+      }
+    }
+  }
+  // return list;
+
+  /*
+Custom cusObj = new Custom();
+cusObj.setName("DXC_LDAP_EDLI_RoleNames");
+
+Attributes attributes = new Attributes();
+
+Map map = new HashMap();
+
+map.put("NonRoleEntitlements", entList);
+
+attributes.setMap(map);
+
+cusObj.setAttributes(attributes);
+
+context.saveObject(cusObj);
+context.commitTransaction();
+
+*/
+  Set setObj = new HashSet(entList);
+  entList = new ArrayList(setObj);
+
+  File file = new File("C:\\Users\\knelanti\\Desktop\\EDLICSV\\EDLI.csv"); 
+
+  FileWriter csvWriter = new FileWriter("C:\\Users\\knelanti\\Desktop\\EDLICSV\\EDLI.csv");
+  /*
+  csvWriter.append("UserName");
+  csvWriter.append(",");
+  csvWriter.append("UserEntitlements");		
+  csvWriter.append("\n");
+  */
+  BufferedWriter WriteFileBufferObj = new BufferedWriter(csvWriter);
+  WriteFileBufferObj.write("UserName , UserEntitlements");
+  WriteFileBufferObj.newLine();
+
+  Filter appFilter = Filter.eq("links.application.name", "LDAP-Enterprise Data Lake Infrastructure");
+
+  List&lt;Identity> idList = context.getObjects(Identity.class, new QueryOptions().addFilter(appFilter));
+  // return idList.size();
+  for (Identity identity : idList) {
+
+    IdentityService identityService = new IdentityService(context);
+
+    List&lt;Link> links = identityService.getLinks(identity, context.getObject(Application.class, "LDAP-Enterprise Data Lake Infrastructure"));
+
+    Link link = links.get(0);
+
+    List  attribute = (List) link.getAttribute("memberOf");
+
+    if(attribute != null &amp;&amp; entList.containsAll(attribute)) {
+
+      /*// return attribute;
+      csvWriter.append(identity.getName()+","+ attribute);
+      csvWriter.append("\n");
+*/
+      WriteFileBufferObj.write(identity.getName()+","+ attribute);
+      WriteFileBufferObj.newLine();
+    }
+
+  }
+  WriteFileBufferObj.flush();
+  WriteFileBufferObj.close();
+  //WriteFileBufferObj.close();
+
+  // csvWriter.flush();
+  //  csvWriter.close();
+
+  return "success";
+
+  </Source>
+</Rule>

@@ -1,0 +1,261 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE Rule PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<Rule created="1586958355313" id="8a9aa074717cbc5101717e16cb7101ee" language="beanshell" modified="1590518245226" name="EFX-Rule-TriggerLeaverEvent">
+  <Description>
+    This rule launches Leaver workflow for the Terminated Identites if Leaver event is not triggered after 24 hours of Terminated Date and send an email to L3 team with list of Identities for whom Leaver workflow is triggered. 
+  </Description>
+  <Signature returnType="ProvisioningResult">
+    <Inputs>
+      <Argument name="log">
+        <Description>
+          The log object associated with the SailPointContext.
+        </Description>
+      </Argument>
+      <Argument name="context">
+        <Description>
+          A sailpoint.api.SailPointContext object that can be used to query the database if necessary.
+        </Description>
+      </Argument>
+    </Inputs>
+    <Returns>
+      <Argument name="output1">
+        <Description>Total number of Terminated Identities: </Description>
+      </Argument>
+      <Argument name="output2">
+        <Description>Number of Terminated Identities for whom Leaver is triggered by this task: </Description>
+      </Argument>
+      <Argument name="output3">
+        <Description>Number of Terminated Identities skipped as Leaver triggered already: </Description>
+      </Argument>
+    </Returns>
+  </Signature>
+  <Source>
+
+  import java.io.BufferedWriter;
+  import java.io.FileWriter;
+  import java.io.IOException;
+  import java.nio.file.Files;
+  import java.nio.file.Paths;
+  import java.text.ParseException;
+  import java.text.SimpleDateFormat;
+  import java.text.DateFormat;
+  import java.util.Date;
+  import java.util.List;
+  import java.util.Iterator;
+  import sailpoint.object.Filter;
+  import sailpoint.object.Identity;
+  import sailpoint.object.QueryOptions;
+  import sailpoint.object.EmailOptions;
+  import sailpoint.object.EmailTemplate;
+  import sailpoint.api.Workflower;
+  import sailpoint.object.Workflow;
+  import sailpoint.object.WorkflowLaunch;
+  import sailpoint.object.Custom;
+  import sailpoint.object.EmailFileAttachment;
+  import sailpoint.object.Attributes;
+  import sailpoint.api.RequestManager;
+  import sailpoint.object.Request;
+  import sailpoint.object.RequestDefinition;
+  import sailpoint.workflow.StandardWorkflowHandler;
+  import java.util.ArrayList;
+  import sailpoint.api.SailPointContext;
+  import sailpoint.object.AuditEvent;
+  import sailpoint.tools.GeneralException;
+  import sailpoint.tools.Util;
+  import sailpoint.object.TaskDefinition;
+  import sailpoint.object.TaskResult;
+
+  import sailpoint.object.AbstractChangeEvent;
+  import sailpoint.object.AbstractChangeEvent.Operation;
+  import sailpoint.object.IdentityChangeEvent;
+  import sailpoint.object.IdentityTrigger;
+  import sailpoint.api.ObjectUtil;
+  import sailpoint.server.Auditor;
+
+
+  List list = new ArrayList();
+  List leaverTriggeredIdentityList = new ArrayList();
+  List leaverSkippededIdentityList = new ArrayList();
+
+//Number of hours after which Termination Leaver workflow to be triggered is configured in this custom object.
+  Custom custom = context.getObject(Custom.class,"EFX-CustomObject-TriggerLeaverEvent");
+  int terminationHour = custom.get("terminationHours");
+
+  Date date = new Date();
+  System.out.println("cur date"+date.getTime());
+  SimpleDateFormat format = new SimpleDateFormat("dd/MM/yyyy");
+  String currDate = format.format(date);
+  Date currentDate = format.parse(currDate);
+  long currentDateMillis = currentDate.getTime()-(terminationHour*60*60*1000);
+
+//FileName is created with current date
+  SimpleDateFormat formatObj = new SimpleDateFormat("dd-MM-yyyy-hh-mm-ss");
+  String currDateInFileName = formatObj.format(date);
+
+// change file path if needed  
+  File LeaverTriggerIdentitiesFile = new File("E://TerminationTrigger/LeaverTriggerIdentitiesFile"+currDateInFileName+".csv");
+
+  if(!LeaverTriggerIdentitiesFile.exists()){
+    LeaverTriggerIdentitiesFile.createNewFile();
+  }
+
+//change file path if needed
+  File LeaverTriggerSkippedIdentitiesFile = new File("E://TerminationTrigger/LeaverTriggerSkippedIdentitiesFile"+currDateInFileName+".csv");
+  if(!LeaverTriggerSkippedIdentitiesFile.exists()){
+    LeaverTriggerSkippedIdentitiesFile.createNewFile();
+  }
+
+
+  FileWriter fw = new FileWriter(LeaverTriggerIdentitiesFile); 
+  BufferedWriter WriteFileBuffer = new BufferedWriter(fw);
+
+  WriteFileBuffer.write("Identity Name,Display Name,userLastDay,Current Status");
+  WriteFileBuffer.newLine();
+
+  FileWriter fw2 = new FileWriter(LeaverTriggerSkippedIdentitiesFile); 
+  BufferedWriter WriteFileBuffer2 = new BufferedWriter(fw2);
+
+  WriteFileBuffer2.write("Identity Name,Display Name,userLastDay,Current Status");
+  WriteFileBuffer2.newLine();
+  Filter filter = Filter.and(Filter.le("terminationDateInMillis",Long.toString(currentDateMillis)),Filter.eq("currentStatus","Terminated"));
+
+  QueryOptions qp = new QueryOptions();
+  qp.add(filter);
+
+//search method is faster than getobjects method
+  Iterator&lt;Identity> identities = context.search(Identity.class, qp);
+
+  while(identities.hasNext())
+  {
+    Identity identity = identities.next();
+    String identityName = identity.getName();
+
+    log.debug("identityName in EFX-Rule-TriggerLeaverEvent rule :"+identityName);
+/*
+   
+// checking Leaver triggered or not by validating whether Audit Event is created or not.
+    Filter aeFilter = Filter.and(Filter.eq("action", "identityLifecycleEvent"),Filter.eq("target", "Identity:" + identityName), Filter.notnull("string1"));
+    Filter filter = Filter.eq("string1", "Leaver");
+    Filter finalFilter  = Filter.and(aeFilter, filter);
+    */
+    
+
+    Filter aeFilter = Filter.and(Filter.eq("action", "identityLifecycleEvent"), Filter.notnull("string1"));	
+    Filter filter = Filter.eq("string1", "Leaver");
+    Filter aeFilter1 = Filter.or(Filter.eq("target", "Identity:" + identityName),Filter.eq("string3","Launched workflow Leaver: "+ identityName));	
+    Filter finalFilter  = Filter.and(aeFilter, filter,aeFilter1);
+   
+    
+    List &lt;AuditEvent> aeList = context.getObjects(AuditEvent.class,new QueryOptions().addFilter(finalFilter));
+    if(aeList.size() == 0){
+
+//Leaver workflow name
+      String workflowName = "Efx-WF-LifecycleEvent-Leaver";
+
+//Request object name is given based on workflow and identity name.
+      String caseName = "Execute " + workflowName + " for: " + identityName;
+      Workflow eventWorkflow = context.getObject(Workflow.class, workflowName);
+      if(eventWorkflow != null)
+      { 
+        Identity id = context.getObjectByName(Identity.class, "spadmin");
+        long launchTime = System.currentTimeMillis() + 60000;
+        caseName = caseName + "(" + launchTime + ")";
+        Attributes reqArgs = new Attributes();
+        reqArgs.put(StandardWorkflowHandler.ARG_REQUEST_DEFINITION,sailpoint.request.WorkflowRequestExecutor.DEFINITION_NAME);
+        reqArgs.put(sailpoint.workflow.StandardWorkflowHandler.ARG_WORKFLOW, workflowName);
+        reqArgs.put(sailpoint.workflow.StandardWorkflowHandler.ARG_REQUEST_NAME, caseName);
+        reqArgs.put("requestName", caseName);
+        Attributes wfArgs = new Attributes();
+        wfArgs.put("identityName", identityName);
+        wfArgs.put("workflow", eventWorkflow.getId());
+        reqArgs.putAll(wfArgs);
+        Request req = new Request();
+        RequestDefinition reqdef = context.getObject(RequestDefinition.class, "Workflow Request");
+        req.setDefinition(reqdef);
+        req.setEventDate(new Date(launchTime));
+        req.setOwner(id);
+        req.setName(caseName);
+        req.setAttributes(reqdef, reqArgs);
+//Launch Workflow
+        RequestManager.addRequest(context, req);
+
+        list.add(identity.getName());
+        leaverTriggeredIdentityList.add(identityName);
+
+        String target = "Identity:"+identityName;
+
+        String identityDisplayName = identity.getDisplayName();       
+        if(Util.isNullOrEmpty(identityDisplayName)){
+        identityDisplayName = identityName;
+        }
+                
+        String string3 = "Launched workflow 'Leaver: "+identityDisplayName+"'";
+
+//Create Audit Event		
+        Auditor.logAs("EFX-Rule-TriggerLeaverEvent", "identityLifecycleEvent", target,"Leaver", "Disable all accounts when a user leaves.", string3, "Rule 'EFX-Rule-TriggerLeaverEvent' matched"); 
+        context.commitTransaction();
+
+      } 
+
+      String displayName = identity.getDisplayName();
+      String terminationDateInMillis = (String) identity.getAttribute("terminationDateInMillis");
+      String userLastDay = (String) identity.getAttribute("userLastDay");
+      String currentStatus = (String) identity.getAttribute("currentStatus"); 
+      WriteFileBuffer.write(identity.getName()+","+displayName+","+userLastDay+","+currentStatus);
+      WriteFileBuffer.newLine();
+    }else{
+
+      list.add(identity.getName());
+      leaverSkippededIdentityList.add(identityName);
+      log.debug("identity skipped coz leaver already triggered for : "+identity.getName());
+      String displayName = identity.getDisplayName();
+      String terminationDateInMillis = (String) identity.getAttribute("terminationDateInMillis");
+      String userLastDay = (String) identity.getAttribute("userLastDay");   
+      String currentStatus = (String) identity.getAttribute("currentStatus"); 
+      WriteFileBuffer2.write(identity.getName()+","+displayName+","+userLastDay+","+currentStatus);
+      WriteFileBuffer2.newLine();
+    }
+  }
+
+  log.debug("total no. of Identities :"+list.size());
+  log.debug("Number of Terminated Identities for whom Leaver is triggered by this task :"+leaverTriggeredIdentityList.size());
+  log.debug("Number of Terminated Identities skipped as Leaver triggered already:"+leaverSkippededIdentityList.size()); 
+
+  WriteFileBuffer.close();
+  WriteFileBuffer2.close();
+
+
+  DateFormat dateFormat = new SimpleDateFormat("MM-dd-yyyy");
+  String date1 = dateFormat.format(new Date());
+
+  EmailTemplate template = context.getObject( EmailTemplate.class, "EFX-Email-InternalLeaverTriggerEmailNotification" ); 
+  template.setTo("sandeep.jabbala@equifax.com"); //better set to address to options
+//If any email address to be copied uncomment below line and add the email address.
+//  template.setCc("sailpointdev@equifax.com");
+
+  EmailOptions options = new EmailOptions();
+  options.setVariable("date", date1);
+
+  byte[] bFile = Files.readAllBytes(Paths.get("E://TerminationTrigger/LeaverTriggerIdentitiesFile"+currDateInFileName+".csv")); // We can change file path as needed 
+
+  EmailFileAttachment attachment = new EmailFileAttachment( "E://TerminationTrigger/LeaverTriggerIdentitiesFile"+currDateInFileName+".csv", EmailFileAttachment.MimeType.MIME_CSV, bFile); // We can change file path as needed
+  options.addAttachment(attachment);
+
+
+  byte[] bFile2 = Files.readAllBytes(Paths.get("E://TerminationTrigger/LeaverTriggerSkippedIdentitiesFile"+currDateInFileName+".csv")); // We can change file path as needed 
+
+  EmailFileAttachment attachment2 = new EmailFileAttachment( "E://TerminationTrigger/LeaverTriggerSkippedIdentitiesFile"+currDateInFileName+".csv", EmailFileAttachment.MimeType.MIME_CSV, bFile2); // We can change file path as needed
+  options.addAttachment(attachment2);
+
+  context.sendEmailNotification(template, options);
+
+  TaskResult result = context.getObjectByName(TaskResult.class , "EFX-Task-TriggerLeaverEvent");
+  if(result != null){
+    result.setAttribute("output3",leaverSkippededIdentityList.size());
+    result.setAttribute("output2",leaverTriggeredIdentityList.size()); 
+    result.setAttribute("output1",list.size());
+  }
+  return "Success";
+
+  </Source>
+</Rule>

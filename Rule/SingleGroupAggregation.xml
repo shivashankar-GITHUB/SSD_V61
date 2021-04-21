@@ -1,0 +1,85 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE Rule PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<Rule created="" id="" language="beanshell" modified="" name="SingleGroupAggregation">
+   <Source><![CDATA[
+ import sailpoint.object.Application;  
+    import sailpoint.object.Attributes;  
+    import sailpoint.object.Custom;  
+    import sailpoint.object.Filter;  
+    import sailpoint.object.Identity;  
+    import sailpoint.object.Link;  
+    import sailpoint.object.QueryOptions;  
+    import sailpoint.object.ResourceObject;  
+    import sailpoint.api.Aggregator;  
+    import sailpoint.connector.Connector; 
+    import sailpoint.object.ManagedAttribute;    
+    import org.apache.log4j.Logger;
+		  
+	  Logger log = Logger.getLogger("sailpoint.nm.iiq.SingleGroupAggregation"); 
+	  log.info("Starting rule SingleGroupAggregation");
+	  
+	List pdlGrpsList = new ArrayList();
+	List finalpdlGrps = new ArrayList();
+	Custom custmObj = context.getObject(Custom.class,"NMPDLGroupsList");
+
+	if(custmObj != null && custmObj.get("PDLGroups") != null && custmObj.get("PDLGroups").size()>0 ){
+		pdlGrpsList =(List) custmObj.get("PDLGroups");
+		for(String strPdlGrp:pdlGrpsList){
+      
+			String applicationName = "Active Directory"; 
+			String groupName = "CN="+strPdlGrp+",OU=Email Distribution,OU=Field,OU=Internal,OU=Groups,DC=nmdev,DC=nmfco,DC=com"; 
+			Application appObject = context.getObjectByName(Application.class, applicationName);  
+			String appConnName = appObject.getConnector(); 
+			log.debug("Application " + applicationName + " uses connector " + appConnName); 
+			try {  
+				Connector appConnector = sailpoint.connector.ConnectorFactory.getConnector(appObject, null);  
+				if (null == appConnector) {  
+					log.debug("Failed to construct an instance of connector [" + appConnName + "]");  
+					continue;
+				}  
+				log.debug("appConnector------------"+appConnector);
+				ResourceObject rObj = null;  
+				rObj = (ResourceObject) appConnector.getObject("group", groupName, null);  
+				log.debug("rObj------------"+rObj);
+				if (null == rObj) { 
+					log.debug("ERROR: Could not get ResourceObject for account: " + groupName);  
+					continue;
+				}  
+				Attributes argMap = new Attributes();   
+				argMap.put("checkDeleted", "true");    
+				argMap.put("aggregationType", "group");
+				Aggregator agg = new Aggregator(context, argMap);  
+				if (null == agg) {  
+					log.debug("Null Aggregator returned from constructor.  Unable to Aggregate!");  
+					continue;
+				}
+       
+					        
+				ManagedAttribute maObjUpdated=  agg.aggregateGroup(appObject, rObj);
+				System.out.println("maObjUpdated"+maObjUpdated.toXml());
+				if(maObjUpdated !=null ) {
+          
+			finalpdlGrps.add(strPdlGrp);
+
+System.out.println("finalpdlGrps list is::"+finalpdlGrps);
+					
+
+				}
+
+			}
+			catch (Exception exception) {  
+				log.debug("Exception in single group aggregation "+exception+"for the group" + groupName);
+				System.out.println("exception"+exception);
+			} 	 
+		}
+		pdlGrpsList.removeAll(finalpdlGrps);
+    System.out.println("pdlGrpsList after remove list is::"+pdlGrpsList);
+		custmObj.put("PDLGroups",pdlGrpsList);
+		context.saveObject(custmObj);
+    
+		context.commitTransaction();
+
+  }
+  
+  ]]></Source>
+</Rule>

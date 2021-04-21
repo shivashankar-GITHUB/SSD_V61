@@ -1,0 +1,214 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE Rule PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<Rule created="" id="" language="beanshell" modified="" name="RolesCreatedThrowAPI1">
+  
+  <Source>
+  
+  import sailpoint.object.ManagedAttribute;
+import sailpoint.object.Profile;
+  import sailpoint.object.Filter;
+import sailpoint.object.Filter.LeafFilter;
+import sailpoint.object.Filter.LogicalOperation;
+import sailpoint.object.Identity;
+  import sailpoint.object.Bundle;
+  import sailpoint.object.Attributes;
+  import sailpoint.object.Application;
+  
+  import java.io.BufferedReader;
+import java.io.FileReader;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;  
+  
+  public  Map prepareMap ( List res , Map map) {
+		
+		
+		Map  listOfEntitlements = new HashMap ();
+		List entitlements = null;
+		
+		//first value is appname in list
+		String appName =  (String) res.get(1);
+		String entitlementVal = (String) res.get(2);
+		String entitlementAttribute = (String) res.get(3);
+		
+		//System.out.println("apppName is : "+appName +" entitlementVal : "+entitlementVal);
+		if(listOfEntitlements.get(appName) != null) {
+			
+			entitlements = new ArrayList();
+			entitlements.addAll(listOfEntitlements.get(appName));
+			entitlements.add(entitlementVal);
+			entitlements.add(entitlementAttribute);
+			listOfEntitlements.put(appName, entitlements);
+			
+		}else {
+			
+			//if null then 
+			entitlements = new ArrayList();
+			entitlements.add(entitlementVal);
+			entitlements.add(entitlementAttribute);
+			listOfEntitlements.put(appName, entitlements);
+		}
+		
+		
+		
+		
+		// if map not equasl to null
+		if(map != null ) {
+			
+			if(map.get(appName) != null) {
+				
+				entitlements = new ArrayList();
+				entitlements.addAll(map.get(appName));
+				entitlements.addAll(listOfEntitlements.get(appName));
+				
+				listOfEntitlements.put(appName, entitlements);
+				
+			}else {
+				
+				//if map does not contains the appName.
+				listOfEntitlements.putAll(map);
+				
+			}
+			
+		}
+		
+		
+		
+		//System.out.println("listOfEntitlements : "+listOfEntitlements);
+		
+		return listOfEntitlements;
+	}
+  
+  
+  public static Map prepareEntitlementAttributes( List listOfValues ) {
+		
+		
+		Map  listOfEntitlementsAttrbr = new HashMap();
+		
+		
+		String appName = (String) listOfValues.get(1);
+		String attribute = (String) listOfValues.get(3);
+		
+		if(listOfEntitlementsAttrbr.get(appName) != null) {
+		}else {
+			
+			listOfEntitlementsAttrbr.put(appName, attribute);
+		}
+		
+		return listOfEntitlementsAttrbr;
+		
+		
+	}
+  
+  
+  
+  
+  BufferedReader br = new BufferedReader(new FileReader("C:\\Users\\v.ithepalli\\Desktop\\CreatedITRolesBasedOnCsvFiles.csv"));  
+	String line = "";  
+	String splitBy = ",";  
+
+	int count = 0;
+Map rolesData = new HashMap ();
+Map  entitlementAttribute = new HashMap(); 
+
+ 
+ while ((line = br.readLine()) != null) {
+	 
+	  if(count ==0) {
+		  count++;
+		  continue;
+		 
+	  }
+	
+	String [] res  = line.split(splitBy);
+	
+	System.out.println(" res value is : "+Arrays.toString(res));
+	
+  
+	if(res != null) {
+	
+		List listOfVal = Arrays.asList(res);
+     entitlementAttribute = prepareEntitlementAttributes(listOfVal);
+		//if map already contains
+		if(rolesData.get(res[0]) != null){
+			
+			Map  map = (Map) rolesData.get(res[0]);
+			
+			 rolesData.put(res[0], prepareMap(listOfVal,map));
+			
+		}else {
+			 
+			rolesData.put(res[0], prepareMap(listOfVal,null));
+			
+		}
+		
+	}
+
+}
+ 
+  
+  
+   for (String roleName :rolesData.keySet()) {
+	 
+		Map m =   rolesData.get(roleName);
+		 
+     
+		 for(String appName : m.keySet()) {
+       
+       
+       Bundle it_bundle = new Bundle();
+       // it_bundle.setName(managedattribute+"-ITRole");
+		
+		Identity identity = context.getObjectByName(Identity.class,"spadmin");
+		Application application = null;
+		List managedAttributesValues = new ArrayList();
+		//create attributes is mandatory
+		Attributes attributes = new Attributes();
+		Map description = new HashMap();
+		description.put("en_US","");
+		
+		attributes.put("accountSelectorRules","");
+		attributes.put("allowDuplicateAccounts","false");
+		attributes.put("allowMultipleAssignments","false");
+		attributes.put("mergeTemplates","false");
+		attributes.put("sysDescriptions",description);
+  
+			 
+        application = context.getObjectByName(Application.class,appName);
+       
+      String entmntAttr =  entitlementAttribute.get(appName);
+       
+       managedAttributesValues.addAll(m.get(appName));
+        it_bundle.setType("it");
+    it_bundle.setName(roleName + "- role");
+        it_bundle.setAttributes(attributes);
+        it_bundle.setOwner(identity);
+        Profile profile = new Profile();
+        profile.setApplication(application);
+        LeafFilter leafFilter = new LeafFilter();
+        leafFilter.setOperation(LogicalOperation.CONTAINS_ALL);
+        leafFilter.setProperty(entmntAttr);
+        leafFilter.setValue(managedAttributesValues);
+        List  leafFilterList = new ArrayList();
+        leafFilterList.add(leafFilter);
+        profile.setConstraints(leafFilterList);
+        List profilesList = new ArrayList();
+        profilesList.add(profile);
+       // it_bundle.setProfiles(profilesList);
+        it_bundle.setProfiles(profilesList);
+        context.saveObject(it_bundle);
+        context.commitTransaction();
+       
+       
+			 System.out.println(" roleName is : "+roleName +"appName :  "+appName+" values is : "+ m.get(appName)+"entmntAttr: "+entmntAttr);
+		 }
+		 
+		 
+	 }
+  
+  
+
+  </Source>
+</Rule>
